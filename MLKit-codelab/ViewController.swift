@@ -18,11 +18,22 @@ import MLKitFaceDetection
 import MLKitTextRecognition
 import MLKitVision
 import UIKit
+import MLKit
 
 class ViewController: UIViewController {
 
   @IBOutlet weak var imageView: UIImageView!
   @IBOutlet weak var pickerView: UIPickerView!
+    
+    private lazy var textRecognizer = TextRecognizer.textRecognizer()
+    
+    private lazy var faceDetectorOption: FaceDetectorOptions = {
+        let option = FaceDetectorOptions()
+        option.contourMode = .all
+        option.performanceMode = .fast
+        return option
+    } ()
+    private lazy var faceDetector = FaceDetector.faceDetector(options: faceDetectorOption)
 
   /// An overlay view that displays detection annotations.
   private lazy var annotationOverlayView: UIView = {
@@ -72,25 +83,146 @@ class ViewController: UIViewController {
   // MARK: Text Recognition
 
   func runTextRecognition(with image: UIImage) {
-
+      let visionImage = VisionImage(image: image)
+      textRecognizer.process(visionImage) { features, error in
+          self.processResult(from: features, error: error)
+      }
   }
 
   func processResult(from text: Text?, error: Error?) {
-
+      removeDetectionAnnotations()
+      guard error == nil, let text = text else {
+          let errorString = error?.localizedDescription ?? Constants.detectionNoResultsMessage
+          print("Text recognizer filed with error: \(errorString)")
+          return
+      }
+      
+      let transform = self.transformMatrix()
+      
+      // Blocks
+      for block in text.blocks {
+          drawFrame(block.frame, in: .purple, transform: transform)
+          
+          // Lines
+          for line in block.lines {
+              drawFrame(line.frame, in: .orange, transform: transform)
+              
+              // Elements
+              for element in line.elements {
+                  drawFrame(element.frame, in: .green, transform: transform)
+                  
+                  let transformedRect = element.frame.applying(transform)
+                  let label = UILabel(frame: transformedRect)
+                  label.text = element.text
+                  label.adjustsFontSizeToFitWidth = true
+                  self.annotationOverlayView.addSubview(label)
+              }
+          }
+      }
   }
 
   // MARK: Face Contour Detection
 
   func runFaceContourDetection(with image: UIImage) {
-
+      let visionImage = VisionImage(image: image)
+      faceDetector.process(visionImage) { features, error in
+          self.processResult(from: features, error: error)
+      }
   }
 
   func processResult(from faces: [Face]?, error: Error?) {
-
+      removeDetectionAnnotations()
+      guard let faces = faces else {
+          return
+      }
+      
+      for feature in faces {
+          let transform = self.transformMatrix()
+          let transformedRect = feature.frame.applying(transform)
+          UIUtilities.addRectangle(
+            transformedRect,
+            to: self.annotationOverlayView,
+            color: UIColor.green
+          )
+          self.addContours(forFace: feature, transform: transform)
+      }
   }
 
   private func addContours(forFace face: Face, transform: CGAffineTransform) {
+      // Face
+      if let faceContour = face.contour(ofType: .face) {
+        for point in faceContour.points {
+          drawPoint(point, in: .blue, transform: transform)
+        }
+      }
 
+      // Eyebrows
+      if let topLeftEyebrowContour = face.contour(ofType: .leftEyebrowTop) {
+        for point in topLeftEyebrowContour.points {
+          drawPoint(point, in: .orange, transform: transform)
+        }
+      }
+      if let bottomLeftEyebrowContour = face.contour(ofType: .leftEyebrowBottom) {
+        for point in bottomLeftEyebrowContour.points {
+          drawPoint(point, in: .orange, transform: transform)
+        }
+      }
+      if let topRightEyebrowContour = face.contour(ofType: .rightEyebrowTop) {
+        for point in topRightEyebrowContour.points {
+          drawPoint(point, in: .orange, transform: transform)
+        }
+      }
+      if let bottomRightEyebrowContour = face.contour(ofType: .rightEyebrowBottom) {
+        for point in bottomRightEyebrowContour.points {
+          drawPoint(point, in: .orange, transform: transform)
+        }
+      }
+
+      // Eyes
+      if let leftEyeContour = face.contour(ofType: .leftEye) {
+        for point in leftEyeContour.points {
+          drawPoint(point, in: .cyan, transform: transform)
+        }
+      }
+      if let rightEyeContour = face.contour(ofType: .rightEye) {
+        for point in rightEyeContour.points {
+          drawPoint(point, in: .cyan, transform: transform)
+        }
+      }
+
+      // Lips
+      if let topUpperLipContour = face.contour(ofType: .upperLipTop) {
+        for point in topUpperLipContour.points {
+          drawPoint(point, in: .red, transform: transform)
+        }
+      }
+      if let bottomUpperLipContour = face.contour(ofType: .upperLipBottom) {
+        for point in bottomUpperLipContour.points {
+          drawPoint(point, in: .red, transform: transform)
+        }
+      }
+      if let topLowerLipContour = face.contour(ofType: .lowerLipTop) {
+        for point in topLowerLipContour.points {
+          drawPoint(point, in: .red, transform: transform)
+        }
+      }
+      if let bottomLowerLipContour = face.contour(ofType: .lowerLipBottom) {
+        for point in bottomLowerLipContour.points {
+          drawPoint(point, in: .red, transform: transform)
+        }
+      }
+
+      // Nose
+      if let noseBridgeContour = face.contour(ofType: .noseBridge) {
+        for point in noseBridgeContour.points {
+          drawPoint(point, in: .yellow, transform: transform)
+        }
+      }
+      if let noseBottomContour = face.contour(ofType: .noseBottom) {
+        for point in noseBottomContour.points {
+          drawPoint(point, in: .yellow, transform: transform)
+        }
+      }
   }
 
   /// Returns a string representation of the detection results.
@@ -119,7 +251,7 @@ class ViewController: UIViewController {
     )
   }
 
-  private func drawPoint(_ point: FacePoint, in color: UIColor, transform: CGAffineTransform) {
+  private func drawPoint(_ point: VisionPoint, in color: UIColor, transform: CGAffineTransform) {
     let transformedPoint = pointFrom(point).applying(transform)
     UIUtilities.addCircle(
       atPoint: transformedPoint,
@@ -128,8 +260,8 @@ class ViewController: UIViewController {
       radius: Constants.smallDotRadius)
   }
 
-  private func pointFrom(_ visionPoint: FacePoint) -> CGPoint {
-    return CGPoint(x: CGFloat(visionPoint.x.floatValue), y: CGFloat(visionPoint.y.floatValue))
+  private func pointFrom(_ visionPoint: VisionPoint) -> CGPoint {
+      return CGPoint(x: CGFloat(visionPoint.x), y: CGFloat(visionPoint.y))
   }
 
   private func transformMatrix() -> CGAffineTransform {
